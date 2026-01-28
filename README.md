@@ -29,7 +29,7 @@ A real-time, computer vision-based system designed to enhance road safety by mon
 1.  **Clone the Repository** (or download the source code):
 
     ```bash
-    git clone https://github.com/yourusername/driver-monitoring-system.git
+    git clone https://github.com/devanshrahatal/driver-state-monitor.git
     cd driver-monitoring-system
     ```
 
@@ -106,3 +106,4 @@ This project is for **educational and research purposes only**. It is not a cert
 **GitHub:** [DevanshRahatal](https://github.com/DevanshRahatal)
 **LinkedIn:** [Devansh Rahatal](https://www.linkedin.com/in/devansh-rahatal/)
 **Email:** devanshrahatal@gmail.com
+
