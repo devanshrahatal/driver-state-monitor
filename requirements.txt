@@ -1,6 +1,11 @@
-opencv-python
-mediapipe
-numpy
-scipy
-pygame
-absl-py
+opencv-python==4.9.0.80
+mediapipe==0.10.21
+protobuf>=4.25.3,<5.0.0
+numpy==1.26.4
+pandas==2.2.2
+matplotlib==3.8.2
+fpdf2==2.8.7
+pygame==2.6.1
+pyttsx3==2.90
+scipy==1.13.0
+absl-py==2.4.0
