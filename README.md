@@ -1,4 +1,4 @@
-# DriveGuard — Driver State Monitoring System
+# DriveGuard — Driver State Monitoring and Analyzing System
 
 A real-time, computer vision-based safety system built to continuously monitor driver attentiveness. DriveGuard utilizes **MediaPipe Face Mesh** and **OpenCV** to dynamically detect signs of drowsiness, fatigue, and distraction, actively alerting the driver and initiating emergency protocols if they become unresponsive.
 
