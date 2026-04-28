@@ -1,0 +1,24 @@
+{
+    "thresholds": {
+        "ear_threshold": 0.23,
+        "drowsy_time": 2.0,
+        "sleepy_blink_time": 0.3,
+        "blink_rate_threshold": 25,
+        "recovery_time": 10,
+        "mar_threshold": 0.6,
+        "yawn_time": 2.0,
+        "distract_time": 2.0,
+        "distract_recovery_time": 0.5,
+        "no_face_threshold": 1.5,
+        "no_face_distracted_threshold": 3.0
+    },
+    "emergency": {
+        "emergency_time": 15.0,
+        "repeat_interval": 30.0
+    },
+    "session": {
+        "break_reminder_minutes": 90,
+        "record_duration": 5,
+        "panel_width": 550
+    }
+}
