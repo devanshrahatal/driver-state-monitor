@@ -11,6 +11,9 @@ Detailed usage instructions are maintained in README.md.
 import os
 import sys
 import pandas as pd
+from dotenv import load_dotenv
+
+load_dotenv()
 import matplotlib
 matplotlib.use("Agg")  # Non-interactive backend — generate PNGs only
 import matplotlib.pyplot as plt
@@ -20,6 +23,17 @@ from matplotlib.colors import LinearSegmentedColormap
 import numpy as np
 from datetime import datetime, timedelta
 from fpdf import FPDF
+import json
+import google.generativeai as genai
+
+# ── Configuration ────────────────────────────────────────────────────────────
+CONFIG_PATH = "config.json"
+try:
+    with open(CONFIG_PATH, "r") as f:
+        CFG = json.load(f)
+except Exception as e:
+    print(f"  [ERROR] Failed to load {CONFIG_PATH}: {e}")
+    CFG = {}
 
 # ── Colour Palette (matching DriveGuard UI) ──────────────────────────────────
 COLORS = {
@@ -184,22 +198,17 @@ def compute_summary(df):
 
 
 def count_episodes(df, state):
-    """Count continuous episodes and their total+max duration for a given state."""
-    in_episode = False
-    episodes = []
-    start_idx = 0
-    for i, row in df.iterrows():
-        if row["State"] == state:
-            if not in_episode:
-                in_episode = True
-                start_idx = i
-        else:
-            if in_episode:
-                episodes.append(i - start_idx)
-                in_episode = False
-    if in_episode:
-        episodes.append(len(df) - start_idx)
-
+    """Count continuous episodes and their total+max duration for a given state (vectorized)."""
+    mask = df["State"] == state
+    # Each new episode starts where the value changes
+    episode_ids = (mask != mask.shift()).cumsum()
+    # Only keep groups where the state matches
+    episodes = (
+        df[mask]
+        .groupby(episode_ids[mask])
+        .size()
+        .tolist()
+    )
     return {
         "count": len(episodes),
         "total_sec": sum(episodes),
@@ -207,7 +216,7 @@ def count_episodes(df, state):
     }
 
 
-def generate_recommendations(summary):
+def generate_rule_based_recommendations(summary):
     """Generate plain-English recommendations based on analysis."""
     recs = []
 
@@ -272,6 +281,60 @@ def generate_recommendations(summary):
         )
 
     return recs
+
+
+def generate_recommendations(summary):
+    """Generate recommendations using AI if configured, otherwise fallback to rules."""
+    api_key = os.getenv("DRIVEGUARD_GEMINI_API_KEY", "").strip()
+
+    if api_key:
+        try:
+            print("  [AI] Querying Gemini for personalized safety recommendations...")
+            genai.configure(api_key=api_key)
+            
+            # Setup model
+            model = genai.GenerativeModel('gemini-2.5-flash')
+            
+            # Construct prompt
+            prompt = f"""
+            You are an expert driver safety analyst. Review the following driving session data and provide 5-8 medium-length, highly actionable, and encouraging recommendations for the driver.
+            Format the response as a simple list of plain-text bullet points (starting with a hyphen '- '). Do not use Markdown formatting like **bold** or asterisks.
+
+            Session Data:
+            - Duration: {format_duration(summary['duration_sec'])}
+            - Overall Risk Grade: {summary['grade']} ({summary['grade_label']})
+            - Peak Fatigue Score: {summary['peak_fatigue']:.0f}%
+            - Average Blink Rate: {summary['avg_blink_rate']:.1f} blinks/min (Normal is 15-20)
+            - Drowsy Episodes: {summary['drowsy_episodes']['count']}
+            - Sleepy Episodes: {summary['sleepy_episodes']['count']}
+            - Distracted Events: {summary['distracted_episodes']['count']}
+            - Total Yawns: {summary['total_yawns']}
+            - Fatigue Trend: {summary['fatigue_trend']}
+            """
+            
+            response = model.generate_content(prompt)
+            
+            # Parse response into a list of strings
+            recs = []
+            for line in response.text.split('\n'):
+                line = line.strip()
+                if line.startswith('- '):
+                    recs.append(line[2:].strip())
+                elif line.startswith('* '):
+                    recs.append(line[2:].strip())
+                elif len(line) > 10 and not line.startswith('#'):
+                    # Catch-all for plain text lines
+                    recs.append(line)
+                    
+            if recs:
+                # Clean up residual markdown
+                return [r.replace('**', '').replace('*', '') for r in recs]
+            
+        except Exception as e:
+            print(f"  [WARN] AI Recommendation failed ({e}). Falling back to rule-based logic.")
+    
+    # Fallback to rule-based
+    return generate_rule_based_recommendations(summary)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -639,7 +702,7 @@ def generate_pdf_report(df, summary, chart_paths, output_path):
     # ── Recommendations ──────────────────────────────────────────────────────
     pdf.section_title("RECOMMENDATIONS")
 
-    recs = generate_recommendations(summary)
+    recs = summary.get("recommendations", [])
     pdf.set_font("Helvetica", "", 10)
     for i, rec in enumerate(recs, 1):
         pdf.set_text_color(80, 200, 255)
@@ -717,9 +780,9 @@ def print_console_summary(summary):
     print()
 
     print("=" * W)
-    print("  RECOMMENDATIONS")
+    print("  AI RECOMMENDATIONS")
     print("=" * W)
-    recs = generate_recommendations(summary)
+    recs = summary.get("recommendations", [])
     for i, rec in enumerate(recs, 1):
         print(f"  {i}. {rec}")
     print()
@@ -747,6 +810,7 @@ def main():
     print(f"\n  Loading {csv_path} ...")
     df = load_csv(csv_path)
     summary = compute_summary(df)
+    summary["recommendations"] = generate_recommendations(summary)
 
     print(f"  [OK] File loaded successfully | {summary['total_rows']} data points | Duration: {format_duration(summary['duration_sec'])}")
 
