@@ -21,6 +21,12 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import os
 import sys
+import json
+import subprocess
+import platform
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Text-to-speech (non-blocking)
 try:
@@ -54,21 +60,21 @@ except ImportError:
     def speak(text):   # silent fallback if pyttsx3 not installed
         pass
 
-# ── Premium UI Palette ────────────────────────────────────────────────────────
-COLOR_BG       = (18,  22,  36)    # Deep navy background
-COLOR_PANEL    = (28,  33,  52)    # Card / panel bg
-COLOR_PANEL2   = (36,  42,  64)    # Slightly lighter card
-COLOR_BORDER   = (55,  65,  95)    # Subtle border
-COLOR_TEXT     = (220, 228, 245)   # Soft white text
-COLOR_SUBTEXT  = (120, 135, 170)   # Dimmed subtext
-COLOR_ACCENT   = (80,  200, 255)   # Cyan-blue accent
-COLOR_WARN     = (45,  210, 165)   # Mint (sleepy)
-COLOR_YEL      = (50,  205, 240)   # Info alternate
-COLOR_DANGER   = (60,   80, 255)   # Electric red-blue (drowsy)
-COLOR_RED      = (50,   80, 240)   # Pure alert red
-COLOR_OK       = (60,  220, 140)   # Bright green (active)
-COLOR_PURP     = (200,  80, 240)   # Purple (distracted)
-COLOR_DARK_BAR = (35,  41,  62)    # Progress bar track
+# ── Premium UI Palette (BGR for OpenCV) ───────────────────────────────────────
+COLOR_BG       = (36,  22,  18)    # Deep navy background
+COLOR_PANEL    = (52,  33,  28)    # Card / panel bg
+COLOR_PANEL2   = (64,  42,  36)    # Slightly lighter card
+COLOR_BORDER   = (95,  65,  55)    # Subtle border
+COLOR_TEXT     = (245, 228, 220)   # Soft white text
+COLOR_SUBTEXT  = (170, 135, 120)   # Dimmed subtext
+COLOR_ACCENT   = (255, 200,  80)   # Cyan-blue accent
+COLOR_WARN     = (255, 200,  80)   # Cyan-blue (matching accent)
+COLOR_YEL      = (255, 200,  80)   # Cyan-blue (matching accent)
+COLOR_DANGER   = (255,  80,  60)   # Electric red (drowsy)
+COLOR_RED      = (240,  80,  50)   # Pure alert red
+COLOR_OK       = (140, 220,  60)   # Bright green (active)
+COLOR_PURP     = (240,  80, 200)   # Purple (distracted)
+COLOR_DARK_BAR = (62,   41,  35)   # Progress bar track
 
 # ── Drawing Helpers ───────────────────────────────────────────────────────────
 
@@ -122,6 +128,129 @@ def blend_rect(img, x1, y1, x2, y2, color, alpha=0.55):
     cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
     cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
 
+# ══════════════════════════════════════════════════════════════════════════════
+#  STARTUP: RECEIVER EMAIL PROMPT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def show_email_prompt():
+    """Show a styled startup window to collect the emergency receiver email."""
+    import tkinter as tk
+
+    try:
+        from tkinterdnd2 import TkinterDnD
+        root = TkinterDnD.Tk()
+    except ImportError:
+        root = tk.Tk()
+
+    # Colour palette (matching DriveGuard dashboard)
+    BG            = "#121624"
+    PANEL2        = "#242840"
+    BORDER_CLR    = "#37415F"
+    TEXT_CLR      = "#DCE4F5"
+    SUBTEXT_CLR   = "#7887AA"
+    ACCENT_CLR    = "#50C8FF"
+    ACCENT_HOVER  = "#6DD4FF"
+    DANGER_CLR    = "#F05050"
+
+    root.title("DriveGuard \u2014 Setup")
+    root.configure(bg=BG)
+    root.resizable(False, False)
+
+    win_w, win_h = 520, 310
+    sw = root.winfo_screenwidth()
+    sh = root.winfo_screenheight()
+    root.geometry(f"{win_w}x{win_h}+{(sw - win_w) // 2}+{(sh - win_h) // 2}")
+
+    # ── Header bar ───────────────────────────────────────────────────────────
+    hdr = tk.Frame(root, bg=PANEL2, height=50)
+    hdr.pack(fill="x")
+    hdr.pack_propagate(False)
+
+    tk.Label(hdr, text="  DG  ", bg=ACCENT_CLR, fg="#0A0F19",
+             font=("Segoe UI", 14, "bold")).pack(side="left", fill="y")
+    tk.Label(hdr, text="DriveGuard", bg=PANEL2, fg=TEXT_CLR,
+             font=("Segoe UI", 13, "bold")).pack(side="left", padx=(10, 0))
+    tk.Label(hdr, text="Setup", bg=PANEL2, fg=SUBTEXT_CLR,
+             font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
+
+    tk.Frame(root, bg=ACCENT_CLR, height=2).pack(fill="x")
+
+    # ── Body ─────────────────────────────────────────────────────────────────
+    body = tk.Frame(root, bg=BG)
+    body.pack(fill="both", expand=True, padx=30, pady=18)
+
+    tk.Label(body, text="\u26a0", bg=BG, fg=DANGER_CLR,
+             font=("Segoe UI", 24, "bold")).pack()
+    tk.Label(body, text="Emergency Contact Setup",
+             bg=BG, fg=TEXT_CLR,
+             font=("Segoe UI", 13, "bold")).pack(pady=(4, 2))
+    tk.Label(body,
+             text="Enter the email address to receive emergency alerts",
+             bg=BG, fg=SUBTEXT_CLR,
+             font=("Segoe UI", 9)).pack(pady=(0, 14))
+
+    # ── Email entry ──────────────────────────────────────────────────────────
+    ef = tk.Frame(body, bg=BG)
+    ef.pack(fill="x")
+
+    tk.Label(ef, text="Receiver Email:", bg=BG, fg=SUBTEXT_CLR,
+             font=("Segoe UI", 9)).pack(anchor="w")
+
+    email_var = tk.StringVar(value="")
+    email_entry = tk.Entry(ef, textvariable=email_var, bg="#0E1220",
+                           fg=TEXT_CLR, font=("Consolas", 11),
+                           insertbackground=ACCENT_CLR, relief="flat",
+                           highlightbackground=BORDER_CLR,
+                           highlightthickness=1, highlightcolor=ACCENT_CLR)
+    email_entry.pack(fill="x", pady=(4, 0), ipady=6)
+    email_entry.focus_set()
+
+    # Status line
+    status_var = tk.StringVar(value="")
+    status_lbl = tk.Label(body, textvariable=status_var, bg=BG,
+                          fg=DANGER_CLR, font=("Segoe UI", 9))
+    status_lbl.pack(anchor="w", pady=(6, 0))
+
+    result = {"email": None}
+
+    def on_start():
+        email = email_var.get().strip()
+        if not email or "@" not in email or "." not in email.split("@")[-1]:
+            status_var.set("\u26a0  Please enter a valid email address.")
+            return
+        result["email"] = email
+        root.destroy()
+
+    def on_close():
+        root.destroy()
+        sys.exit(0)
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
+    email_entry.bind("<Return>", lambda e: on_start())
+
+    # ── Start button ─────────────────────────────────────────────────────────
+    bf = tk.Frame(body, bg=BG)
+    bf.pack(pady=(14, 0))
+
+    start_btn = tk.Button(bf, text="  Start Monitoring  ",
+                          bg=ACCENT_CLR, fg="#0A0F19",
+                          font=("Segoe UI", 11, "bold"), relief="flat",
+                          cursor="hand2", activebackground=ACCENT_HOVER,
+                          activeforeground="#0A0F19", command=on_start,
+                          bd=0, padx=24, pady=8)
+    start_btn.pack()
+
+    start_btn.bind("<Enter>", lambda e: start_btn.config(bg=ACCENT_HOVER))
+    start_btn.bind("<Leave>", lambda e: start_btn.config(bg=ACCENT_CLR))
+
+    root.mainloop()
+    return result["email"]
+
+
+_startup_receiver_email = show_email_prompt()
+if _startup_receiver_email is None:
+    sys.exit(0)
+
 # Open Camera FIRST (fastest to start)
 cap = cv2.VideoCapture(0)
 
@@ -166,26 +295,64 @@ def mouth_aspect_ratio(mouth):
     horizontal = dist.euclidean(mouth[2], mouth[3])
     return vertical / horizontal
 
-# Configuration Thresholds
-EAR_THRESHOLD = 0.23
-DROWSY_TIME = 2.0
-SLEEPY_BLINK_TIME = 0.3
-BLINK_RATE_THRESHOLD = 25
-RECOVERY_TIME = 10
-MAR_THRESHOLD = 0.6
-YAWN_TIME = 2.0
+# ══════════════════════════════════════════════════════════════════════════════
+#  CONFIGURATION LOADER
+# ══════════════════════════════════════════════════════════════════════════════
 
-DISTRACT_TIME = 2.0
-DISTRACT_RECOVERY_TIME = 0.5
-PANEL_WIDTH = 550
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
 
-# Emergency Email Settings
-EMERGENCY_TIME = 15.0
-SENDER_EMAIL = "devanshrahatal@gmail.com"
-SENDER_PASSWORD = "hlhq elvg fggz gium"
-RECEIVER_EMAIL = "devanshrahatal@gmail.com"
+def load_config():
+    """Load settings from config.json, falling back to defaults if missing."""
+    defaults = {
+        "thresholds": {
+            "ear_threshold": 0.23, "drowsy_time": 2.0, "sleepy_blink_time": 0.3,
+            "blink_rate_threshold": 25, "recovery_time": 10, "mar_threshold": 0.6,
+            "yawn_time": 2.0, "distract_time": 2.0, "distract_recovery_time": 0.5,
+            "no_face_threshold": 1.5, "no_face_distracted_threshold": 3.0,
+        },
+        "emergency": {
+            "emergency_time": 15.0, "repeat_interval": 30.0,
+        },
+        "session": {
+            "break_reminder_minutes": 90, "record_duration": 5, "panel_width": 550,
+        },
+    }
+    if os.path.isfile(CONFIG_FILE):
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                user_cfg = json.load(f)
+            # Merge: user values override defaults
+            for section in defaults:
+                if section in user_cfg:
+                    defaults[section].update(user_cfg[section])
+        except Exception as e:
+            print(f"[WARN] Could not load config.json: {e} — using defaults.")
+    else:
+        print("[INFO] config.json not found — using defaults.")
+    return defaults
 
-EMERGENCY_REPEAT_INTERVAL = 30.0  # Resend email every 30 seconds while eyes are closed
+CFG = load_config()
+
+# Configuration Thresholds (from config)
+EAR_THRESHOLD = CFG["thresholds"]["ear_threshold"]
+DROWSY_TIME = CFG["thresholds"]["drowsy_time"]
+SLEEPY_BLINK_TIME = CFG["thresholds"]["sleepy_blink_time"]
+BLINK_RATE_THRESHOLD = CFG["thresholds"]["blink_rate_threshold"]
+RECOVERY_TIME = CFG["thresholds"]["recovery_time"]
+MAR_THRESHOLD = CFG["thresholds"]["mar_threshold"]
+YAWN_TIME = CFG["thresholds"]["yawn_time"]
+
+DISTRACT_TIME = CFG["thresholds"]["distract_time"]
+DISTRACT_RECOVERY_TIME = CFG["thresholds"]["distract_recovery_time"]
+PANEL_WIDTH = CFG["session"]["panel_width"]
+
+# Emergency Email Settings (from config + .env)
+EMERGENCY_TIME = CFG["emergency"]["emergency_time"]
+SENDER_EMAIL = os.getenv("DRIVEGUARD_SENDER_EMAIL", "")
+SENDER_PASSWORD = os.getenv("DRIVEGUARD_SENDER_PASSWORD", "")
+RECEIVER_EMAIL = _startup_receiver_email  # Set by startup prompt
+
+EMERGENCY_REPEAT_INTERVAL = CFG["emergency"]["repeat_interval"]
 
 def send_emergency_email():
     try:
@@ -237,8 +404,8 @@ distract_recovery_start = None
 
 # Face Detection Buffer
 face_missing_start = None
-NO_FACE_THRESHOLD = 1.5          # Seconds before showing "Face Not Detected"
-NO_FACE_DISTRACTED_THRESHOLD = 3.0  # Extra grace period after a distraction head-turn
+NO_FACE_THRESHOLD = CFG["thresholds"]["no_face_threshold"]
+NO_FACE_DISTRACTED_THRESHOLD = CFG["thresholds"]["no_face_distracted_threshold"]
 
 # Fatigue Score Tracker
 fatigue_score = 0.0
@@ -262,7 +429,14 @@ if not os.path.exists(session_evidence_dir):
 recording = False
 video_writer = None
 record_start_time = None
-RECORD_DURATION = 5
+RECORD_DURATION = CFG["session"]["record_duration"]
+
+# Session Timer & Break Reminder
+session_start_time = time.time()
+BREAK_REMINDER_SEC = CFG["session"]["break_reminder_minutes"] * 60
+last_break_reminder_time = 0      # Epoch of last break reminder spoken
+break_reminder_shown = False      # Whether the dashboard banner is active
+break_banner_time = None          # When to hide the banner
 
 # CSV Logging Setup - New file per session in records folder
 RECORDS_DIR = "records"
@@ -386,6 +560,30 @@ while not system_ready:
         cv2.destroyAllWindows()
         sys.exit(0)
 
+# ── Session Start Chime ───────────────────────────────────────────────────────
+def play_chime(freq=880, duration_ms=180, volume=0.35):
+    """Play a short synthesized chime using pygame."""
+    try:
+        import pygame
+        sample_rate = 44100
+        n_samples = int(sample_rate * duration_ms / 1000)
+        buf = np.zeros((n_samples, 2), dtype=np.int16)
+        for i in range(n_samples):
+            t = i / sample_rate
+            fade = 1.0 - (i / n_samples)
+            val = int(32767 * volume * fade * np.sin(2 * np.pi * freq * t))
+            buf[i] = [val, val]
+        sound = pygame.mixer.Sound(buffer=buf)
+        sound.play()
+    except Exception:
+        pass
+
+play_chime(880, 180)          # High chime
+time.sleep(0.12)
+play_chime(1174, 220)         # Even higher follow-up
+speak("DriveGuard is now active. Drive safe.")
+session_start_time = time.time()   # Reset session clock precisely at monitoring start
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -494,12 +692,13 @@ while True:
             else:
                 if eye_closed_start is not None:
                     blink_times.append(current_time)
-                    last_emergency_email_time = None
 
                     if state == "DROWSY":
                         new_state = "ACTIVE"
                         new_color = (0, 255, 0)
                         drowsy_active = False
+                        # Only reset emergency timer on full DROWSY→ACTIVE recovery
+                        last_emergency_email_time = None
                     
                     # Stop recording if recovered early
                     if recording:
@@ -689,21 +888,24 @@ while True:
             cv2.putText(combined_display, "DG", (px + 8, 42),
                         cv2.FONT_HERSHEY_DUPLEX, 0.95, (10, 15, 25), 2, cv2.LINE_AA)
 
-            # Title and date — starts safely after the logo box
-            cv2.putText(combined_display, "DrivrGuard", (px + 68, 26),
+            # Title and subtitle
+            cv2.putText(combined_display, "DriveGuard", (px + 68, 26),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.56, COLOR_TEXT, 1, cv2.LINE_AA)
-            cv2.putText(combined_display, "Driver Monitoring System", (px + 68, 43),
+            cv2.putText(combined_display, "Driver Monitoring System", (px + 68, 46),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.32, COLOR_SUBTEXT, 1, cv2.LINE_AA)
-            live_date = time.strftime("%d %b %Y")
-            cv2.putText(combined_display, live_date, (px + 68, 46),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_SUBTEXT, 1, cv2.LINE_AA)
 
-            # Live clock — right-aligned
+            # Live clock + date - right-aligned
+            live_date = time.strftime("%d %b %Y")
             live_time = time.strftime("%H:%M:%S")
-            ts_w = cv2.getTextSize(live_time, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)[0][0]
+
+            ts_w = cv2.getTextSize(live_time, cv2.FONT_HERSHEY_SIMPLEX, 0.48, 1)[0][0]
+            dt_w = cv2.getTextSize(live_date, cv2.FONT_HERSHEY_SIMPLEX, 0.34, 1)[0][0]
             cv2.putText(combined_display, live_time,
-                        (px + PW - ts_w - 10, 38),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.52, COLOR_ACCENT, 1, cv2.LINE_AA)
+                        (px + PW - ts_w - 10, 28),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.48, COLOR_ACCENT, 1, cv2.LINE_AA)
+            cv2.putText(combined_display, live_date,
+                        (px + PW - dt_w - 10, 48),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.34, COLOR_SUBTEXT, 1, cv2.LINE_AA)
 
             py = 78
             CARD_X1 = px + 12
@@ -770,7 +972,7 @@ while True:
 
             # ── HEAD POSTURE CARD ─────────────────────────────────────────────
             draw_rounded_rect(combined_display, CARD_X1, py, CARD_X2, py + 108, 8, COLOR_PANEL2)
-            draw_section_header(combined_display, CARD_X1 + 12, py + 20, "HEAD POSTURE", COLOR_YEL)
+            draw_section_header(combined_display, CARD_X1 + 12, py + 20, "HEAD POSTURE", COLOR_ACCENT)
 
             dir_colors = {
                 "FORWARD": COLOR_OK,
@@ -799,7 +1001,7 @@ while True:
 
             # ── FATIGUE SCORE CARD ────────────────────────────────────────────
             draw_rounded_rect(combined_display, CARD_X1, py, CARD_X2, py + 100, 8, COLOR_PANEL2)
-            draw_section_header(combined_display, CARD_X1 + 12, py + 20, "FATIGUE INDEX", COLOR_OK)
+            draw_section_header(combined_display, CARD_X1 + 12, py + 20, "FATIGUE INDEX", COLOR_ACCENT)
 
             bar_color = (COLOR_OK if fatigue_score < 30
                          else COLOR_WARN if fatigue_score < 60
@@ -820,6 +1022,68 @@ while True:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.45, (10, 15, 25), 1, cv2.LINE_AA)
 
             py += 112
+
+            # ── SESSION TIMER CARD ────────────────────────────────────────────
+            elapsed = time.time() - session_start_time
+            el_h = int(elapsed // 3600)
+            el_m = int((elapsed % 3600) // 60)
+            el_s = int(elapsed % 60)
+            timer_str = f"{el_h:02d}:{el_m:02d}:{el_s:02d}"
+
+            draw_rounded_rect(combined_display, CARD_X1, py, CARD_X2, py + 100, 8, COLOR_PANEL2)
+            draw_section_header(combined_display, CARD_X1 + 12, py + 20, "SESSION TIMER", COLOR_ACCENT)
+
+            cv2.putText(combined_display, timer_str, (CARD_X1 + 12, py + 46),
+                        cv2.FONT_HERSHEY_DUPLEX, 0.72, COLOR_TEXT, 1, cv2.LINE_AA)
+
+            # ── Break progress bar (dedicated row) ────────────────────────────
+            if BREAK_REMINDER_SEC > 0:
+                break_progress = min(1.0, elapsed / BREAK_REMINDER_SEC)
+                bp_color = COLOR_OK if break_progress < 0.75 else (COLOR_WARN if break_progress < 1.0 else COLOR_RED)
+
+                # "NEXT BREAK" label
+                cv2.putText(combined_display, "NEXT BREAK", (CARD_X1 + 12, py + 66),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, COLOR_SUBTEXT, 1, cv2.LINE_AA)
+
+                # Full-width progress bar
+                bp_bar_w = CARD_X2 - CARD_X1 - 24
+                draw_bar(combined_display, CARD_X1 + 12, py + 72, bp_bar_w, 14,
+                         break_progress, 1.0, bp_color)
+
+                # Remaining time label (right-aligned)
+                remaining_sec = max(0, BREAK_REMINDER_SEC - elapsed)
+                rem_m = int(remaining_sec // 60)
+                rem_s = int(remaining_sec % 60)
+                rem_str = f"{rem_m}m {rem_s}s" if remaining_sec > 0 else "BREAK TIME!"
+                rem_w = cv2.getTextSize(rem_str, cv2.FONT_HERSHEY_SIMPLEX, 0.38, 1)[0][0]
+                cv2.putText(combined_display, rem_str,
+                            (CARD_X2 - rem_w - 12, py + 66),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.38, bp_color, 1, cv2.LINE_AA)
+
+            py += 112
+
+            # ── BREAK REMINDER LOGIC ──────────────────────────────────────────
+            if BREAK_REMINDER_SEC > 0 and elapsed >= BREAK_REMINDER_SEC:
+                now_t = time.time()
+                # Trigger voice reminder every BREAK_REMINDER_SEC interval
+                if now_t - last_break_reminder_time >= BREAK_REMINDER_SEC:
+                    last_break_reminder_time = now_t
+                    break_reminder_shown = True
+                    break_banner_time = now_t
+                    speak("You have been driving for a long time. Please take a break and rest for a while.")
+
+            # Show break banner for 10 seconds after trigger
+            if break_reminder_shown and break_banner_time is not None:
+                if time.time() - break_banner_time < 10.0:
+                    blink_on = int(time.time() * 2) % 2 == 0
+                    banner_col = COLOR_ACCENT if blink_on else COLOR_WARN
+                    draw_rounded_rect(combined_display, CARD_X1, py, CARD_X2, py + 32, 8, COLOR_PANEL2)
+                    cv2.putText(combined_display, "Take a break! Rest for safety.",
+                                (CARD_X1 + 12, py + 22),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.44, banner_col, 1, cv2.LINE_AA)
+                    py += 40
+                else:
+                    break_reminder_shown = False
 
             # ── RECORDING BADGE ───────────────────────────────────────────────
             if recording:
@@ -944,5 +1208,373 @@ while True:
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
+# ── Session End Chime ─────────────────────────────────────────────────────────
+play_chime(1174, 180)         # High note
+time.sleep(0.12)
+play_chime(880, 220)          # Descending follow-up
+speak("Session ended. Thank you for using DriveGuard.")
+time.sleep(0.3)
+
+# ── Cleanup ──────────────────────────────────────────────────────────────────
+if alarm_on and alarm_sound is not None:
+    try:
+        alarm_sound.stop()
+    except Exception:
+        pass
+
+if recording and video_writer is not None:
+    try:
+        video_writer.release()
+    except Exception:
+        pass
+
 cap.release()
 cv2.destroyAllWindows()
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  POST-SESSION: REPORT GENERATION PROMPT
+# ══════════════════════════════════════════════════════════════════════════════
+
+def launch_post_session_ui():
+    """
+    Show styled Tkinter windows after monitoring ends:
+    1. Ask if user wants an analytical report  (Y / N)
+    2. If Y → file-picker to select / confirm CSV path
+    3. Run analysis → generate PDF → auto-open it
+    """
+    import tkinter as tk
+    from tkinter import filedialog
+
+    # Try to import tkinterdnd2 for drag-and-drop support
+    try:
+        from tkinterdnd2 import TkinterDnD, DND_FILES
+        HAS_DND = True
+    except ImportError:
+        HAS_DND = False
+
+    # ── Colour constants (matching DriveGuard dashboard) ─────────────────────
+    BG            = "#121624"
+    PANEL         = "#1C2134"
+    PANEL2        = "#242840"
+    BORDER_CLR    = "#37415F"
+    TEXT_CLR      = "#DCE4F5"
+    SUBTEXT_CLR   = "#7887AA"
+    ACCENT_CLR    = "#50C8FF"
+    ACCENT_HOVER  = "#6DD4FF"
+    OK_CLR        = "#3CDC8C"
+    DANGER_CLR    = "#F05050"
+    BTN_GRAY      = "#2A3248"
+    BTN_GRAY_HVR  = "#3A4560"
+
+    # ── Helper: centre a window on screen ────────────────────────────────────
+    def centre_window(win, w, h):
+        sw = win.winfo_screenwidth()
+        sh = win.winfo_screenheight()
+        win.geometry(f"{w}x{h}+{(sw - w) // 2}+{(sh - h) // 2}")
+
+    # ══════════════════════════════════════════════════════════════════════════
+    #  WINDOW 1 — "Generate Report?"
+    # ══════════════════════════════════════════════════════════════════════════
+
+    def show_report_prompt():
+        root = TkinterDnD.Tk() if HAS_DND else tk.Tk()
+        root.title("DriveGuard \u2014 Session Complete")
+        root.configure(bg=BG)
+        root.resizable(False, False)
+        centre_window(root, 480, 260)
+
+        # Prevent closing via X from leaving a zombie — treat as "No"
+        root.protocol("WM_DELETE_WINDOW", lambda: (setattr(choice, 'val', False), root.destroy()))
+
+        # ── Header bar ───────────────────────────────────────────────────────
+        hdr = tk.Frame(root, bg=PANEL2, height=50)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+
+        tk.Label(hdr, text="  DG  ", bg=ACCENT_CLR, fg="#0A0F19",
+                 font=("Segoe UI", 14, "bold")).pack(side="left", fill="y")
+        tk.Label(hdr, text="DriveGuard", bg=PANEL2, fg=TEXT_CLR,
+                 font=("Segoe UI", 13, "bold")).pack(side="left", padx=(10, 0))
+        tk.Label(hdr, text="Session Complete", bg=PANEL2, fg=SUBTEXT_CLR,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
+
+        tk.Frame(root, bg=ACCENT_CLR, height=2).pack(fill="x")
+
+        # -- Body -------------------------------------------------------------
+        body = tk.Frame(root, bg=BG)
+        body.pack(fill="both", expand=True, padx=30, pady=18)
+
+        tk.Label(body, text="\u2713", bg=BG, fg=OK_CLR,
+                 font=("Segoe UI", 30, "bold")).pack()
+        tk.Label(body,
+                 text="Session monitoring complete.\nWould you like to generate an analytical report?",
+                 bg=BG, fg=TEXT_CLR, font=("Segoe UI", 11),
+                 justify="center").pack(pady=(4, 22))
+
+        # Choice container
+        class choice:
+            val = False
+
+        bf = tk.Frame(body, bg=BG)
+        bf.pack()
+
+        def on_yes():
+            choice.val = True
+            root.destroy()
+
+        yes_btn = tk.Button(bf, text="  Yes, Generate Report  ",
+                            bg=ACCENT_CLR, fg="#0A0F19",
+                            font=("Segoe UI", 11, "bold"), relief="flat",
+                            cursor="hand2", activebackground=ACCENT_HOVER,
+                            activeforeground="#0A0F19", command=on_yes,
+                            bd=0, padx=20, pady=8)
+        yes_btn.pack(side="left", padx=(0, 14))
+
+        no_btn = tk.Button(bf, text="  No, Exit  ",
+                           bg=BTN_GRAY, fg=SUBTEXT_CLR,
+                           font=("Segoe UI", 11), relief="flat",
+                           cursor="hand2", activebackground=BTN_GRAY_HVR,
+                           activeforeground=TEXT_CLR,
+                           command=root.destroy, bd=0, padx=20, pady=8)
+        no_btn.pack(side="left")
+
+        # Hover effects
+        yes_btn.bind("<Enter>", lambda e: yes_btn.config(bg=ACCENT_HOVER))
+        yes_btn.bind("<Leave>", lambda e: yes_btn.config(bg=ACCENT_CLR))
+        no_btn.bind("<Enter>", lambda e: no_btn.config(bg=BTN_GRAY_HVR, fg=TEXT_CLR))
+        no_btn.bind("<Leave>", lambda e: no_btn.config(bg=BTN_GRAY, fg=SUBTEXT_CLR))
+
+        root.mainloop()
+        return choice.val
+
+    # --------------------------------------------------------------------------
+    #  WINDOW 2 - File Picker + Analysis Runner
+    # --------------------------------------------------------------------------
+
+    def show_file_picker():
+        root = TkinterDnD.Tk() if HAS_DND else tk.Tk()
+        root.title("DriveGuard \u2014 Select Session File")
+        root.configure(bg=BG)
+        root.resizable(False, False)
+        centre_window(root, 600, 400)
+        root.protocol("WM_DELETE_WINDOW", root.destroy)
+
+        # -- Header -----------------------------------------------------------
+        hdr = tk.Frame(root, bg=PANEL2, height=50)
+        hdr.pack(fill="x")
+        hdr.pack_propagate(False)
+
+        tk.Label(hdr, text="  DG  ", bg=ACCENT_CLR, fg="#0A0F19",
+                 font=("Segoe UI", 14, "bold")).pack(side="left", fill="y")
+        tk.Label(hdr, text="DriveGuard", bg=PANEL2, fg=TEXT_CLR,
+                 font=("Segoe UI", 13, "bold")).pack(side="left", padx=(10, 0))
+        tk.Label(hdr, text="Session Analysis", bg=PANEL2, fg=SUBTEXT_CLR,
+                 font=("Segoe UI", 9)).pack(side="left", padx=(8, 0))
+
+        tk.Frame(root, bg=ACCENT_CLR, height=2).pack(fill="x")
+
+        # -- Body -------------------------------------------------------------
+        body = tk.Frame(root, bg=BG)
+        body.pack(fill="both", expand=True, padx=28, pady=16)
+
+        tk.Label(body, text="Select the session CSV file to analyze",
+                 bg=BG, fg=TEXT_CLR,
+                 font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        tk.Label(body,
+                 text="Paste a path, browse for a file, or drag & drop a CSV below",
+                 bg=BG, fg=SUBTEXT_CLR,
+                 font=("Segoe UI", 9)).pack(anchor="w", pady=(2, 14))
+
+        # -- Drop zone card ---------------------------------------------------
+        drop = tk.Frame(body, bg=PANEL2, highlightbackground=BORDER_CLR,
+                        highlightthickness=2, padx=16, pady=14)
+        drop.pack(fill="x")
+
+        tk.Label(drop, text="CSV File Path:", bg=PANEL2, fg=SUBTEXT_CLR,
+                 font=("Segoe UI", 9)).pack(anchor="w")
+
+        path_var = tk.StringVar(value=os.path.abspath(LOG_FILE))
+
+        entry = tk.Entry(drop, textvariable=path_var, bg="#0E1220", fg=TEXT_CLR,
+                         font=("Consolas", 10), insertbackground=ACCENT_CLR,
+                         relief="flat", highlightbackground=BORDER_CLR,
+                         highlightthickness=1, highlightcolor=ACCENT_CLR)
+        entry.pack(fill="x", pady=(4, 10), ipady=6)
+
+        # Browse button
+        def browse():
+            fp = filedialog.askopenfilename(
+                title="Select Session CSV",
+                initialdir=os.path.abspath(RECORDS_DIR),
+                filetypes=[("CSV Files", "*.csv"), ("All Files", "*.*")]
+            )
+            if fp:
+                path_var.set(fp)
+
+        browse_btn = tk.Button(drop, text="  \U0001f4c1  Browse Files  ",
+                               bg=BTN_GRAY, fg=TEXT_CLR,
+                               font=("Segoe UI", 10), relief="flat",
+                               cursor="hand2", activebackground=BTN_GRAY_HVR,
+                               command=browse, bd=0, padx=12, pady=4)
+        browse_btn.pack(anchor="w")
+        browse_btn.bind("<Enter>", lambda e: browse_btn.config(bg=BTN_GRAY_HVR))
+        browse_btn.bind("<Leave>", lambda e: browse_btn.config(bg=BTN_GRAY))
+
+        # Drag-and-drop zone
+        if HAS_DND:
+            dnd_label = tk.Label(drop,
+                                 text="\u2014 or drag & drop a CSV file here \u2014",
+                                 bg=PANEL2, fg=SUBTEXT_CLR,
+                                 font=("Segoe UI", 9, "italic"))
+            dnd_label.pack(pady=(10, 0))
+
+            def on_drop(event):
+                path = event.data.strip()
+                # Windows wraps multi-word paths in {}
+                if path.startswith("{") and path.endswith("}"):
+                    path = path[1:-1]
+                path_var.set(path)
+                drop.config(highlightbackground=OK_CLR)
+                root.after(1200, lambda: drop.config(highlightbackground=BORDER_CLR))
+
+            drop.drop_target_register(DND_FILES)
+            drop.dnd_bind("<<Drop>>", on_drop)
+
+        # -- Status label -----------------------------------------------------
+        status_var = tk.StringVar(value="")
+        status_lbl = tk.Label(body, textvariable=status_var, bg=BG,
+                              fg=SUBTEXT_CLR, font=("Segoe UI", 9))
+        status_lbl.pack(anchor="w", pady=(12, 0))
+
+        # -- Action buttons ---------------------------------------------------
+        bf = tk.Frame(body, bg=BG)
+        bf.pack(pady=(14, 0))
+
+        def on_analyze():
+            csv_path = path_var.get().strip().strip('"').strip("'")
+
+            if not csv_path or not os.path.isfile(csv_path):
+                status_var.set("\u26a0  File not found. Please check the path.")
+                status_lbl.config(fg=DANGER_CLR)
+                return
+
+            # Show progress
+            status_var.set(">>  Analyzing session data...")
+            status_lbl.config(fg=ACCENT_CLR)
+            analyze_btn.config(state="disabled", bg=BTN_GRAY)
+            cancel_btn.config(state="disabled")
+            root.update()
+
+            try:
+                # Import analysis functions (same directory)
+                from session_analysis import (
+                    load_csv, compute_summary, generate_recommendations,
+                    chart_state_timeline, chart_fatigue_over_time,
+                    chart_ear_over_time, chart_blink_rate,
+                    chart_head_direction_pie, chart_state_distribution,
+                    generate_pdf_report, print_console_summary,
+                    REPORTS_DIR as ANALYSIS_REPORTS_DIR,
+                )
+
+                df = load_csv(csv_path)
+                summary = compute_summary(df)
+                summary["recommendations"] = generate_recommendations(summary)
+                print_console_summary(summary)
+
+                os.makedirs(ANALYSIS_REPORTS_DIR, exist_ok=True)
+                session_name = os.path.splitext(os.path.basename(csv_path))[0]
+                report_folder = os.path.join(ANALYSIS_REPORTS_DIR,
+                                             f"analysis_{session_name}")
+                charts_folder = os.path.join(report_folder, "charts")
+                os.makedirs(charts_folder, exist_ok=True)
+
+                status_var.set(">>  Generating charts...")
+                root.update()
+
+                chart_funcs = {
+                    "state_timeline":     chart_state_timeline,
+                    "fatigue_over_time":  chart_fatigue_over_time,
+                    "ear_over_time":      chart_ear_over_time,
+                    "blink_rate":         chart_blink_rate,
+                    "head_direction_pie": chart_head_direction_pie,
+                    "state_distribution": chart_state_distribution,
+                }
+                chart_paths = {}
+                for key, func in chart_funcs.items():
+                    out = os.path.join(charts_folder, f"{key}.png")
+                    try:
+                        func(df, out)
+                        chart_paths[key] = out
+                    except Exception:
+                        pass
+
+                status_var.set(">>  Building PDF report...")
+                root.update()
+
+                pdf_path = os.path.join(report_folder,
+                                        f"{session_name}_report.pdf")
+                generate_pdf_report(df, summary, chart_paths, pdf_path)
+
+                # Success
+                status_var.set(f"\u2713  Report saved \u2192 {pdf_path}")
+                status_lbl.config(fg=OK_CLR)
+                analyze_btn.config(text="  \u2713  Done  ")
+                root.update()
+
+                # Auto-open PDF in default viewer (cross-platform)
+                try:
+                    abs_pdf = os.path.abspath(pdf_path)
+                    if platform.system() == "Windows":
+                        os.startfile(abs_pdf)
+                    elif platform.system() == "Darwin":  # macOS
+                        subprocess.run(["open", abs_pdf])
+                    else:  # Linux
+                        subprocess.run(["xdg-open", abs_pdf])
+                except Exception:
+                    pass
+
+                root.after(2500, root.destroy)
+
+            except Exception as exc:
+                status_var.set(f"\u26a0  Error: {exc}")
+                status_lbl.config(fg=DANGER_CLR)
+                analyze_btn.config(state="normal", bg=ACCENT_CLR,
+                                   text="  Analyze & Generate Report  ")
+                cancel_btn.config(state="normal")
+
+        analyze_btn = tk.Button(bf, text="  Analyze & Generate Report  ",
+                                bg=ACCENT_CLR, fg="#0A0F19",
+                                font=("Segoe UI", 11, "bold"), relief="flat",
+                                cursor="hand2", activebackground=ACCENT_HOVER,
+                                activeforeground="#0A0F19", command=on_analyze,
+                                bd=0, padx=20, pady=8)
+        analyze_btn.pack(side="left", padx=(0, 14))
+
+        cancel_btn = tk.Button(bf, text="  Cancel  ",
+                               bg=BTN_GRAY, fg=SUBTEXT_CLR,
+                               font=("Segoe UI", 11), relief="flat",
+                               cursor="hand2", activebackground=BTN_GRAY_HVR,
+                               activeforeground=TEXT_CLR,
+                               command=root.destroy, bd=0, padx=20, pady=8)
+        cancel_btn.pack(side="left")
+
+        # Hover effects
+        def on_enter_a(e):
+            if str(analyze_btn["state"]) != "disabled":
+                analyze_btn.config(bg=ACCENT_HOVER)
+        def on_leave_a(e):
+            if str(analyze_btn["state"]) != "disabled":
+                analyze_btn.config(bg=ACCENT_CLR)
+
+        analyze_btn.bind("<Enter>", on_enter_a)
+        analyze_btn.bind("<Leave>", on_leave_a)
+        cancel_btn.bind("<Enter>", lambda e: cancel_btn.config(bg=BTN_GRAY_HVR, fg=TEXT_CLR))
+        cancel_btn.bind("<Leave>", lambda e: cancel_btn.config(bg=BTN_GRAY, fg=SUBTEXT_CLR))
+
+        root.mainloop()
+
+    # ── Execute the flow ─────────────────────────────────────────────────────
+    if show_report_prompt():
+        show_file_picker()
+
+launch_post_session_ui()
